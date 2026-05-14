@@ -191,6 +191,7 @@
     <div class="sep"></div>
     <select class="sel" id="anoSel"><option value="all">Todos os anos</option></select>
     <select class="sel" id="projSel"><option value="all">Todos os projetos</option></select>
+    <select class="sel" id="statusSel"><option value="all">Todos os status</option></select>
     <select class="sel" id="catSel"><option value="all">Todas as categorias</option></select>
     <select class="sel" id="sortSel">
       <option value="score">Score ↓</option>
@@ -219,7 +220,7 @@
 const CSV_URL='https://docs.google.com/spreadsheets/d/e/2PACX-1vRnLZouEmFZ4GEE3Qs3t0oOMmexl2ET9Joo67t8zev5JhCBHKJOhelYYJjRngFz51sYX4xxWp7AbYR-/pub?gid=1715470673&single=true&output=csv';
 
 let allBugs=[];
-let fPrio='all',fProj='all',fAno='all',fCat='all',sort='score',search='',viewMode='cards';
+let fPrio='all',fProj='all',fAno='all',fCat='all',fStatus='all',sort='score',search='',viewMode='cards';
 
 async function loadData(){
   const btn=document.getElementById('syncBtn');
@@ -365,6 +366,7 @@ function getFiltered(){
   let d=allBugs.filter(b=>{
     if(fProj!=='all'&&b.proj!==fProj)return false;
     if(fAno!=='all'&&b.ano!==fAno)return false;
+    if(fStatus!=='all'&&b.status!==fStatus)return false;
     if(fCat!=='all'&&b.categoria!==fCat)return false;
     if(fPrio==='extra')return b.pesoExtra>0;
     if(fPrio!=='all'&&prioK(b)!==fPrio)return false;
@@ -380,9 +382,11 @@ function getFiltered(){
 function populateFilters(){
   const anos=[...new Set(allBugs.map(b=>b.ano).filter(Boolean))].sort().reverse();
   const projs=[...new Set(allBugs.map(b=>b.proj).filter(Boolean))].sort();
+  const statuses=[...new Set(allBugs.map(b=>b.status).filter(Boolean))].sort();
   const cats=[...new Set(allBugs.map(b=>b.categoria).filter(c=>c&&c!=='Indefinido'))].sort();
   document.getElementById('anoSel').innerHTML='<option value="all">Todos os anos</option>'+anos.map(a=>`<option value="${a}">${a}</option>`).join('');
   document.getElementById('projSel').innerHTML='<option value="all">Todos os projetos</option>'+projs.map(p=>`<option value="${p}">${p}</option>`).join('');
+  document.getElementById('statusSel').innerHTML='<option value="all">Todos os status</option>'+statuses.map(s=>`<option value="${s}">${s}</option>`).join('');
   document.getElementById('catSel').innerHTML='<option value="all">Todas as categorias</option>'+cats.map(c=>`<option value="${c}">${c}</option>`).join('');
 }
 
@@ -576,6 +580,7 @@ document.querySelectorAll('.pill').forEach(b=>b.addEventListener('click',()=>{
 }));
 document.getElementById('projSel').addEventListener('change',e=>{fProj=e.target.value;renderContent();});
 document.getElementById('anoSel').addEventListener('change',e=>{fAno=e.target.value;renderContent();});
+document.getElementById('statusSel').addEventListener('change',e=>{fStatus=e.target.value;renderContent();});
 document.getElementById('catSel').addEventListener('change',e=>{fCat=e.target.value;renderContent();});
 document.getElementById('sortSel').addEventListener('change',e=>{sort=e.target.value;renderContent();});
 
