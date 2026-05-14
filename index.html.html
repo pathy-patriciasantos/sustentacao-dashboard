@@ -219,10 +219,7 @@
 
 <script>
 // ─── CONFIG ───────────────────────────────────────────────
-const SHEET_ID   = '1Ihf4fCZWKm9xbr3y1NqIk-OCsVwQ5KWBNczwcaLLdEA';
-const SHEET_NAME = 'Controle de Bugs'; // nome da aba
-// URL de exportação CSV pública do Google Sheets
-const CSV_URL = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:csv&sheet=${encodeURIComponent(SHEET_NAME)}`;
+const CSV_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vRnLZouEmFZ4GEE3Qs3t0oOMmexl2ET9Joo67t8zev5JhCBHKJOhelYYJjRngFz51sYX4xxWp7AbYR-/pub?gid=1715470673&single=true&output=csv';
 
 // ─── STATE ────────────────────────────────────────────────
 let allBugs = [];
@@ -231,109 +228,140 @@ let fPrio = 'all', fProj = 'all', sort = 'score', search = '';
 // ─── LOAD DATA ────────────────────────────────────────────
 async function loadData() {
   const btn = document.getElementById('syncBtn');
-  const icon = document.getElementById('syncIcon');
   const dot = document.querySelector('.status-dot');
   btn.classList.add('loading');
-  if(dot){ dot.className='status-dot loading-dot'; }
+  if (dot) dot.className = 'status-dot loading-dot';
 
   try {
     const res = await fetch(CSV_URL + '&t=' + Date.now());
-    if (!res.ok) throw new Error('Erro ao buscar planilha: ' + res.status);
+    if (!res.ok) throw new Error('HTTP ' + res.status);
     const text = await res.text();
+    if (!text || text.trim().length < 10) throw new Error('Planilha vazia ou sem dados.');
     allBugs = parseCSV(text);
+    if (allBugs.length === 0) throw new Error('Nenhum card encontrado. Verifique os cabeçalhos da aba.');
     populateProjFilter();
     renderAll();
-
     const now = new Date();
     document.getElementById('lastSync').textContent =
       `Atualizado ${now.toLocaleTimeString('pt-BR', {hour:'2-digit',minute:'2-digit'})}`;
-    if(dot){ dot.className='status-dot'; }
+    if (dot) dot.className = 'status-dot';
     document.getElementById('errorBanner').classList.remove('show');
   } catch(e) {
-    showError('Não foi possível carregar a planilha. Verifique se ela está pública. ' + e.message);
-    if(dot){ dot.className='status-dot error'; }
+    showError('Não foi possível carregar a planilha: ' + e.message);
+    if (dot) dot.className = 'status-dot error';
   }
   btn.classList.remove('loading');
 }
 
 // ─── PARSE CSV ────────────────────────────────────────────
+// Estrutura da planilha (linha 5 = cabeçalho, dados a partir da linha 6):
+// 0=Jira Key, 1=Projeto, 2=Qtd Clientes, 3=Status Jira, 4=Prioridade Jira
+// 5=Ouvidoria, 6=Reclame Aqui, 7=Procon, 8=Data Abertura, 9=Faixa Criticidade
+// 14=Score, 15=Prioridade Sugerida, 18=Prioridade Final, 19=Motivo Override
+// 21=Épico, 22=Sprint, 25=Observações, 31=Peso Extra, 32=Onboarding
 function parseCSV(text) {
-  const rows = [];
-  const lines = text.split('\n');
-  // Parse simples respeitando aspas
-  function parseLine(line) {
-    const cells = [];
-    let cur = '', inQ = false;
-    for (let i = 0; i < line.length; i++) {
-      const c = line[i];
-      if (c === '"') { inQ = !inQ; }
-      else if (c === ',' && !inQ) { cells.push(cur.trim()); cur = ''; }
-      else cur += c;
+  // Parser CSV robusto — respeita aspas e quebras de linha dentro de células
+  function parseAll(text) {
+    const rows = []; let row = [], cur = '', inQ = false;
+    for (let i = 0; i < text.length; i++) {
+      const ch = text[i], next = text[i+1];
+      if (ch === '"') {
+        if (inQ && next === '"') { cur += '"'; i++; }
+        else inQ = !inQ;
+      } else if (ch === ',' && !inQ) { row.push(cur.trim()); cur = ''; }
+      else if ((ch === '\n' || (ch === '\r' && next === '\n')) && !inQ) {
+        if (ch === '\r') i++;
+        row.push(cur.trim()); rows.push(row); row = []; cur = '';
+      } else cur += ch;
     }
-    cells.push(cur.trim());
-    return cells;
+    if (cur || row.length) { row.push(cur.trim()); rows.push(row); }
+    return rows;
   }
 
-  const header = parseLine(lines[0]).map(h => h.replace(/^"|"$/g,'').toLowerCase().replace(/\s+/g,'_').replace(/[^a-z0-9_]/g,''));
+  const rows = parseAll(text);
 
-  // Índices das colunas que precisamos
-  // Colunas da aba: jira_key, projeto, qtd_clientes_afetados, status_jira,
-  // prioridade, is_ouvidoria, is_reclame_aqui, is_procon, is_onboarding,
-  // data_abertura, faixa_criticidade, peso_metabase
+  // As 4 primeiras linhas são título/agrupadores — dados começam na linha 5 (índice 4 = cabeçalho, 5+ = dados)
+  // Mas o Google Sheets publica sem as linhas mescladas, então detectamos
+  // a linha de cabeçalho procurando "Jira Key"
+  let headerRow = -1;
+  for (let i = 0; i < Math.min(10, rows.length); i++) {
+    if (rows[i].some(c => c.toLowerCase().includes('jira key') || c.toLowerCase() === 'jira key')) {
+      headerRow = i; break;
+    }
+  }
+  if (headerRow === -1) throw new Error('Cabeçalho não encontrado. Verifique a planilha.');
+
+  const header = rows[headerRow].map(h => h.toLowerCase().replace(/\s+|\n/g, ' ').trim());
+  const find = (...terms) => header.findIndex(h => terms.some(t => h.includes(t)));
+
   const idx = {
-    key:        header.indexOf('jira_key'),
-    proj:       header.indexOf('projeto'),
-    clientes:   header.indexOf('qtd_clientes_afetados'),
-    status:     header.indexOf('status_jira'),
-    prio:       header.indexOf('prioridade'),
-    ouvidoria:  header.indexOf('is_ouvidoria'),
-    reclame:    header.indexOf('is_reclame_aqui'),
-    procon:     header.indexOf('is_procon'),
-    onboarding: header.indexOf('is_onboarding'),
-    abertura:   header.indexOf('data_abertura'),
-    faixa:      header.indexOf('faixa_criticidade'),
+    key:        find('jira key'),
+    proj:       find('projeto'),
+    clientes:   find('qtd clientes', 'clientes afetados', 'clientes'),
+    status:     find('status jira', 'status'),
+    ouvidoria:  find('ouvidoria'),
+    reclame:    find('reclame'),
+    procon:     find('procon'),
+    onboarding: find('onboarding'),
+    abertura:   find('data abertura', 'abertura'),
+    faixa:      find('faixa criticidade', 'faixa'),
+    score:      find('score'),
+    prio_final: find('prioridade final', 'prioridade manual'),
+    prio_sug:   find('prioridade sugerida'),
+    motivo:     find('motivo do override', 'motivo override', 'observações', 'observacoes'),
+    peso_extra: find('peso extra'),
+    epico:      find('épico', 'epico'),
+    sprint:     find('sprint'),
   };
 
-  // Fallback: tenta encontrar pelo conteúdo se índices não foram encontrados
-  const bugs = [];
-  const seen = new Set();
+  const bugs = []; const seen = new Set();
+  for (let i = headerRow + 1; i < rows.length; i++) {
+    const c = rows[i];
+    if (!c || c.length < 2) continue;
+    const key = (c[idx.key] || '').trim();
+    if (!key || !key.match(/^[A-Z]+-\d+$/i) || seen.has(key.toUpperCase())) continue;
+    seen.add(key.toUpperCase());
 
-  for (let i = 1; i < lines.length; i++) {
-    if (!lines[i].trim()) continue;
-    const cells = parseLine(lines[i]).map(c => c.replace(/^"|"$/g,''));
-    const key = idx.key >= 0 ? cells[idx.key] : '';
-    if (!key || !key.match(/^[A-Z]+-\d+$/) || seen.has(key)) continue;
-    seen.add(key);
+    const clientes   = parseInt((c[idx.clientes] || '0').replace(/\D/g, '')) || 0;
+    const flag = j => j >= 0 && c[j] ? ['1','sim','true','yes'].includes((c[j]||'').toLowerCase().trim()) ? 1 : 0 : 0;
+    const ouvidoria  = flag(idx.ouvidoria);
+    const reclame    = flag(idx.reclame);
+    const procon     = flag(idx.procon);
+    const onboarding = flag(idx.onboarding);
 
-    const clientes = parseInt(cells[idx.clientes] || '0') || 0;
-    const ouvidoria = cells[idx.ouvidoria] === '1' || cells[idx.ouvidoria]?.toLowerCase() === 'sim' ? 1 : 0;
-    const reclame   = cells[idx.reclame] === '1' || cells[idx.reclame]?.toLowerCase() === 'sim' ? 1 : 0;
-    const procon    = cells[idx.procon] === '1' || cells[idx.procon]?.toLowerCase() === 'sim' ? 1 : 0;
-    const onboarding= cells[idx.onboarding] === '1' || cells[idx.onboarding]?.toLowerCase() === 'sim' ? 1 : 0;
+    // Score: usa o da planilha se disponível, senão calcula
+    const scoreRaw = idx.score >= 0 ? parseFloat((c[idx.score]||'').replace(',','.')) : NaN;
+    const scoreBase = isNaN(scoreRaw) ? calcScore(clientes, ouvidoria, reclame, procon, onboarding) : scoreRaw;
 
-    // Calcular score com os pesos da planilha
-    const scoreBase = calcScore(clientes, ouvidoria, reclame, procon, onboarding);
-    const prio = mapPrio(scoreBase);
+    // Prioridade: usa a Final da planilha se disponível
+    const prioFinal = idx.prio_final >= 0 ? (c[idx.prio_final]||'').trim() : '';
+    const prioSug   = idx.prio_sug  >= 0 ? (c[idx.prio_sug] ||'').trim() : '';
+    const prio = prioFinal || prioSug || mapPrio(scoreBase);
+
+    const pesoExtra   = idx.peso_extra >= 0 ? (parseFloat((c[idx.peso_extra]||'').replace(',','.')) || 0) : 0;
+    const motivoExtra = idx.motivo >= 0 ? (c[idx.motivo]||'').trim() : '';
 
     bugs.push({
-      key,
-      proj:      cells[idx.proj] || '',
+      key: key.toUpperCase(),
+      proj:      (c[idx.proj]     || '').trim(),
       clientes,
-      status:    cells[idx.status] || '',
+      status:    (c[idx.status]   || '').trim(),
       prio,
-      scoreBase,
-      pesoExtra: 0,
-      motivoExtra: '',
+      scoreBase, pesoExtra, motivoExtra,
       ouvidoria, reclame, procon, onboarding,
-      abertura:  cells[idx.abertura] || '',
-      faixa:     cells[idx.faixa] || '',
+      abertura:  (c[idx.abertura] || '').trim(),
+      faixa:     (c[idx.faixa]    || '').trim(),
+      epico:     idx.epico  >= 0 ? (c[idx.epico] ||'').trim() : '',
+      sprint:    idx.sprint >= 0 ? (c[idx.sprint]||'').trim() : '',
     });
   }
 
-  // Ordenar por score descendente
-  bugs.sort((a,b) => b.scoreBase - a.scoreBase);
+  if (bugs.length === 0) throw new Error('Nenhum card encontrado após o cabeçalho.');
+  bugs.sort((a,b) => (b.scoreBase + b.pesoExtra) - (a.scoreBase + a.pesoExtra));
   return bugs;
 }
+
+
 
 function calcScore(clientes, ouvidoria, reclame, procon, onboarding) {
   // Pesos da planilha (aba config)
@@ -502,6 +530,8 @@ function renderCards() {
         <div class="card-field"><div class="k">Clientes afetados</div><div class="v">${b.clientes}</div></div>
         <div class="card-field"><div class="k">Status</div><div class="v" style="font-size:11px;font-weight:400">${b.status}</div></div>
         <div class="card-field"><div class="k">Abertura</div><div class="v" style="font-size:11px;font-weight:400">${b.abertura}</div></div>
+        ${b.epico  ? `<div class="card-field"><div class="k">Épico</div><div class="v" style="font-size:11px;font-weight:400">${b.epico}</div></div>` : ''}
+        ${b.sprint ? `<div class="card-field"><div class="k">Sprint</div><div class="v" style="font-size:11px;font-weight:400">${b.sprint}</div></div>` : ''}
       </div>
       ${extraBox}
       ${tags.length ? `<div class="card-tags">${tags.map(t=>`<span class="tag ${t.cls}">${t.t}</span>`).join('')}</div>` : ''}
