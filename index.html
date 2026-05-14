@@ -143,6 +143,28 @@
   .error-banner{background:var(--p1-bg);border:1px solid var(--p1-border);border-radius:var(--radius-sm);padding:10px 14px;margin-bottom:16px;font-size:12px;color:var(--p1);display:none}
   .error-banner.show{display:block}
 
+  /* MULTI-SELECT STATUS */
+  .ms-wrap{position:relative}
+  .ms-trigger{display:flex;align-items:center;gap:6px;font-size:12px;padding:7px 10px;border-radius:var(--radius-sm);border:1px solid var(--border-med);background:var(--surface);color:var(--text);font-family:'DM Sans',sans-serif;cursor:pointer;white-space:nowrap;min-width:130px;justify-content:space-between}
+  .ms-trigger.active{border-color:#1a60b0;color:#1a60b0}
+  .ms-trigger svg{flex-shrink:0;transition:transform .15s}
+  .ms-trigger.open svg{transform:rotate(180deg)}
+  .ms-badge{background:#1a60b0;color:#fff;border-radius:20px;font-size:10px;font-weight:600;padding:1px 6px;margin-left:2px}
+  .ms-dropdown{position:absolute;top:calc(100% + 4px);left:0;min-width:200px;background:var(--surface);border:1px solid var(--border-med);border-radius:var(--radius);box-shadow:0 8px 24px rgba(0,0,0,0.12);z-index:200;display:none;overflow:hidden}
+  .ms-dropdown.open{display:block}
+  .ms-search{padding:8px 10px;border-bottom:1px solid var(--border)}
+  .ms-search input{width:100%;border:1px solid var(--border-med);border-radius:var(--radius-sm);padding:5px 8px;font-size:12px;font-family:'DM Sans',sans-serif;outline:none;color:var(--text);background:var(--surface2)}
+  .ms-search input:focus{border-color:#1a60b0}
+  .ms-actions{display:flex;border-bottom:1px solid var(--border)}
+  .ms-action-btn{flex:1;font-size:11px;padding:6px;border:none;background:transparent;color:var(--text-2);cursor:pointer;font-family:'DM Sans',sans-serif}
+  .ms-action-btn:hover{background:var(--surface2);color:var(--text)}
+  .ms-action-btn:first-child{border-right:1px solid var(--border)}
+  .ms-list{max-height:220px;overflow-y:auto;padding:4px 0}
+  .ms-item{display:flex;align-items:center;gap:8px;padding:7px 12px;cursor:pointer;transition:background .1s}
+  .ms-item:hover{background:var(--surface2)}
+  .ms-item input[type=checkbox]{width:14px;height:14px;accent-color:#1a60b0;cursor:pointer;flex-shrink:0}
+  .ms-item label{font-size:12px;color:var(--text);cursor:pointer;flex:1}
+
   @media(max-width:700px){
     .container{padding:16px}.header{padding:14px 16px}
     .metrics{grid-template-columns:1fr 1fr}.charts-row{grid-template-columns:1fr}.toolbar{gap:6px}
@@ -191,7 +213,20 @@
     <div class="sep"></div>
     <select class="sel" id="anoSel"><option value="all">Todos os anos</option></select>
     <select class="sel" id="projSel"><option value="all">Todos os projetos</option></select>
-    <select class="sel" id="statusSel"><option value="all">Todos os status</option></select>
+    <div class="ms-wrap" id="statusWrap">
+      <button class="ms-trigger" id="msTrigger" type="button">
+        <span id="msLabel">Todos os status</span>
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+      </button>
+      <div class="ms-dropdown" id="msDropdown">
+        <div class="ms-search"><input type="text" id="msSearch" placeholder="Buscar status…"></div>
+        <div class="ms-actions">
+          <button class="ms-action-btn" onclick="msSelectAll()">Selecionar todos</button>
+          <button class="ms-action-btn" onclick="msClearAll()">Limpar</button>
+        </div>
+        <div class="ms-list" id="msList"></div>
+      </div>
+    </div>
     <select class="sel" id="catSel"><option value="all">Todas as categorias</option></select>
     <select class="sel" id="sortSel">
       <option value="score">Score ↓</option>
@@ -220,7 +255,7 @@
 const CSV_URL='https://docs.google.com/spreadsheets/d/e/2PACX-1vRnLZouEmFZ4GEE3Qs3t0oOMmexl2ET9Joo67t8zev5JhCBHKJOhelYYJjRngFz51sYX4xxWp7AbYR-/pub?gid=1715470673&single=true&output=csv';
 
 let allBugs=[];
-let fPrio='all',fProj='all',fAno='all',fCat='all',fStatus='all',sort='score',search='',viewMode='cards';
+let fPrio='all',fProj='all',fAno='all',fCat='all',fStatus=new Set(),sort='score',search='',viewMode='cards';
 
 async function loadData(){
   const btn=document.getElementById('syncBtn');
@@ -366,7 +401,7 @@ function getFiltered(){
   let d=allBugs.filter(b=>{
     if(fProj!=='all'&&b.proj!==fProj)return false;
     if(fAno!=='all'&&b.ano!==fAno)return false;
-    if(fStatus!=='all'&&b.status!==fStatus)return false;
+    if(fStatus.size>0&&!fStatus.has(b.status))return false;
     if(fCat!=='all'&&b.categoria!==fCat)return false;
     if(fPrio==='extra')return b.pesoExtra>0;
     if(fPrio!=='all'&&prioK(b)!==fPrio)return false;
@@ -386,8 +421,8 @@ function populateFilters(){
   const cats=[...new Set(allBugs.map(b=>b.categoria).filter(c=>c&&c!=='Indefinido'))].sort();
   document.getElementById('anoSel').innerHTML='<option value="all">Todos os anos</option>'+anos.map(a=>`<option value="${a}">${a}</option>`).join('');
   document.getElementById('projSel').innerHTML='<option value="all">Todos os projetos</option>'+projs.map(p=>`<option value="${p}">${p}</option>`).join('');
-  document.getElementById('statusSel').innerHTML='<option value="all">Todos os status</option>'+statuses.map(s=>`<option value="${s}">${s}</option>`).join('');
   document.getElementById('catSel').innerHTML='<option value="all">Todas as categorias</option>'+cats.map(c=>`<option value="${c}">${c}</option>`).join('');
+  msPopulate(statuses);
 }
 
 function renderAll(){renderMetrics();renderCharts();renderContent();}
@@ -580,8 +615,90 @@ document.querySelectorAll('.pill').forEach(b=>b.addEventListener('click',()=>{
 }));
 document.getElementById('projSel').addEventListener('change',e=>{fProj=e.target.value;renderContent();});
 document.getElementById('anoSel').addEventListener('change',e=>{fAno=e.target.value;renderContent();});
-document.getElementById('statusSel').addEventListener('change',e=>{fStatus=e.target.value;renderContent();});
 document.getElementById('catSel').addEventListener('change',e=>{fCat=e.target.value;renderContent();});
+
+// ── MULTI-SELECT STATUS ───────────────────────────────────
+let allStatuses=[];
+
+function msPopulate(statuses){
+  allStatuses=statuses;
+  msRenderList(statuses);
+}
+
+function msRenderList(statuses){
+  document.getElementById('msList').innerHTML=statuses.map(s=>`
+    <div class="ms-item" onclick="msToggle('${s.replace(/'/g,"\\'")}')">
+      <input type="checkbox" id="cb_${s.replace(/\s/g,'_')}" ${fStatus.has(s)?'checked':''} onclick="event.stopPropagation();msToggle('${s.replace(/'/g,"\\'")}')">
+      <label for="cb_${s.replace(/\s/g,'_')}">${s}</label>
+    </div>`).join('');
+}
+
+function msToggle(s){
+  if(fStatus.has(s)) fStatus.delete(s); else fStatus.add(s);
+  msUpdateUI();
+  renderContent();
+}
+
+function msSelectAll(){
+  allStatuses.forEach(s=>fStatus.add(s));
+  msUpdateUI();
+  renderContent();
+}
+
+function msClearAll(){
+  fStatus.clear();
+  msUpdateUI();
+  renderContent();
+}
+
+function msUpdateUI(){
+  // Atualiza checkboxes
+  allStatuses.forEach(s=>{
+    const cb=document.getElementById('cb_'+s.replace(/\s/g,'_'));
+    if(cb) cb.checked=fStatus.has(s);
+  });
+  // Atualiza label do trigger
+  const label=document.getElementById('msLabel');
+  const trigger=document.getElementById('msTrigger');
+  const badge=document.querySelector('.ms-badge');
+  if(badge) badge.remove();
+  if(fStatus.size===0){
+    label.textContent='Todos os status';
+    trigger.classList.remove('active');
+  } else if(fStatus.size===1){
+    label.textContent=[...fStatus][0];
+    trigger.classList.add('active');
+  } else {
+    label.textContent='Status';
+    const b=document.createElement('span');
+    b.className='ms-badge'; b.textContent=fStatus.size;
+    trigger.insertBefore(b, trigger.querySelector('svg'));
+    trigger.classList.add('active');
+  }
+}
+
+// Toggle dropdown
+document.getElementById('msTrigger').addEventListener('click',e=>{
+  e.stopPropagation();
+  const dd=document.getElementById('msDropdown');
+  const tr=document.getElementById('msTrigger');
+  dd.classList.toggle('open');
+  tr.classList.toggle('open');
+});
+
+// Fechar ao clicar fora
+document.addEventListener('click',e=>{
+  if(!document.getElementById('statusWrap').contains(e.target)){
+    document.getElementById('msDropdown').classList.remove('open');
+    document.getElementById('msTrigger').classList.remove('open');
+  }
+});
+
+// Busca interna
+document.getElementById('msSearch').addEventListener('input',e=>{
+  const q=e.target.value.toLowerCase();
+  msRenderList(allStatuses.filter(s=>s.toLowerCase().includes(q)));
+});
 document.getElementById('sortSel').addEventListener('change',e=>{sort=e.target.value;renderContent();});
 
 loadData();
